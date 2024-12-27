@@ -10,6 +10,12 @@ from PIL import Image
 import io
 import requests
 
+# SageMaker Clarify imports
+from sagemaker.clarify import ClarifyExplainerConfig, ClarifyFeatureConfig, ClarifyShapConfig
+from sagemaker.session import Session
+from sagemaker.deserializers import JSONDeserializer
+from sagemaker.serializers import JSONSerializer
+
 # Setting up logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -135,3 +141,45 @@ def output_fn(prediction, content_type=JSON_CONTENT_TYPE):
         return json.dumps(response)
 
     raise ValueError(f"Unsupported content type: {content_type}")
+
+def explain_model(session, endpoint_name):
+    """Set up SageMaker Clarify for model explainability.
+
+    Args:
+        session (sagemaker.session.Session): SageMaker session.
+        endpoint_name (str): Name of the deployed endpoint.
+
+    Returns:
+        None: Outputs SHAP values and feature importance to logs.
+    """
+    logger.info("Setting up SageMaker Clarify for explainability.")
+
+    # Define feature configuration
+    feature_config = ClarifyFeatureConfig(
+        features=["Pixel Values"],
+        feature_types=["numerical"],
+        dataset_type="image",
+    )
+
+    # SHAP configuration
+    shap_config = ClarifyShapConfig(
+        baseline=[[[0.0] * 224 for _ in range(224)]],  # Zero baseline for SHAP
+        num_samples=100,
+        agg_method="mean_abs",
+    )
+
+    # Create explainer configuration
+    explainer_config = ClarifyExplainerConfig(
+        clarify_config_type="SHAP",
+        feature_config=feature_config,
+        shap_config=shap_config,
+    )
+
+    # Run SHAP explanations
+    explainer = session.create_explainer(endpoint_name=endpoint_name, config=explainer_config)
+    shap_values = explainer.explain(
+        inputs=[[[0.5] * 224 for _ in range(224)]],  # Example input for SHAP
+        model_parameters={"max_concurrency": 1}
+    )
+
+    logger.info(f"SHAP values: {shap_values}")
